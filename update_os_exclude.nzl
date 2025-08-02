@@ -1,0 +1,80 @@
+#!/usr/bin/env nozzle
+# NOZZLE - Atualização de SO com exclusão de pacotes (paralelo)
+
+let hosts = [
+  {"host": "192.168.15.50", "user": "root", "port": 22, "key": "/root/.ssh/id_rsa"},
+  {"host": "192.168.15.60", "user": "root", "port": 22, "key": "/root/.ssh/id_rsa"}
+]
+
+let excludes = ["java*", "openjdk*", "jdk*"]
+
+fn maybe_override_excludes():
+  let env_json = sh("bash -lc 'printf %s \"$NOZZLE_EXCLUDES\"'")["stdout"]
+  if env_json:
+    let parsed = json_parse(env_json)
+    if not parsed.get("_error", None):
+      if isinstance(parsed, list):
+        global excludes
+        excludes = parsed
+
+fn build_exclude_flag():
+  if not excludes or len(excludes) == 0:
+    return ""
+  let s = "--exclude=" + excludes[0]
+  for i in range(1, len(excludes)):
+    s = s + "," + excludes[i]
+  return s
+
+fn build_grep_regex():
+  if not excludes or len(excludes) == 0:
+    return ""
+  let pat = ""
+  for i in range(0, len(excludes)):
+    let g = excludes[i]
+    let r = g.replace("*", ".*")
+    if i == 0:
+      pat = r
+    else:
+      pat = pat + "|" + r
+  return pat
+
+fn update_host(h):
+  let host = h["host"]
+  let user = h.get("user", "root")
+  let port = h.get("port", 22)
+  let key = h.get("key", None)
+
+  print("(", host, ") Iniciando update...")
+
+  let is_debian = ssh(host, "command -v apt-get >/dev/null 2>&1", user=user, port=port, key=key)["rc"] == 0
+
+  if is_debian:
+    let grep_pat = build_grep_regex()
+    if grep_pat != "":
+      let hold_cmd = "set -e; pkgs=$(dpkg -l | awk '{print $2}' | grep -E '^(" + grep_pat + ")$' || true); if [ -n \"$pkgs\" ]; then apt-mark hold $pkgs; fi"
+      ssh(host, hold_cmd, user=user, port=port, key=key, sudo=true)
+
+    ssh(host, "apt-get update", user=user, port=port, key=key, sudo=true)
+    ssh(host, "DEBIAN_FRONTEND=noninteractive apt-get -y upgrade", user=user, port=port, key=key, sudo=true)
+    ssh(host, "DEBIAN_FRONTEND=noninteractive apt-get -y dist-upgrade", user=user, port=port, key=key, sudo=true)
+    ssh(host, "apt-get -y autoremove", user=user, port=port, key=key, sudo=true)
+
+    if grep_pat != "":
+      let unhold_cmd = "set -e; pkgs=$(dpkg -l | awk '{print $2}' | grep -E '^(" + grep_pat + ")$' || true); if [ -n \"$pkgs\" ]; then apt-mark unhold $pkgs; fi"
+      ssh(host, unhold_cmd, user=user, port=port, key=key, sudo=true)
+  else:
+    let excl = build_exclude_flag()
+    if excl != "":
+      ssh(host, "dnf -y " + excl + " update || yum -y " + excl + " update", user=user, port=port, key=key, sudo=true)
+    else:
+      ssh(host, "dnf -y update || yum -y update", user=user, port=port, key=key, sudo=true)
+
+  print("(", host, ") Update concluído")
+
+fn main():
+  maybe_override_excludes()
+  parallel_for(hosts, update_host, forks=2)
+  print("Update de SO finalizado em todos os hosts.")
+
+main()
+
