@@ -1,0 +1,42 @@
+#!/usr/bin/env nozzle
+# NOZZLE - Cópia de arquivos de um host para múltiplos destinos
+
+let origem = {
+  "host": "192.168.15.50",
+  "user": "root",
+  "port": 22,
+  "key": "/root/.ssh/id_rsa",
+  "path": "/tmp/dados"
+}
+
+let destinos = [
+  {
+    "host": "192.168.15.60",
+    "user": "root",
+    "port": 22,
+    "key": "/root/.ssh/id_rsa",
+    "path": "/tmp/dados"
+  },
+  {
+    "host": "192.168.15.70",
+    "user": "root",
+    "port": 22,
+    "key": "/root/.ssh/id_rsa",
+    "path": "/tmp/dados"
+  }
+]
+
+fn copiar_para_destino(dest):
+  print("Copiando de", origem["host"], "para", dest["host"])
+  let tar_cmd = "tar czf - -C " + origem["path"] + " ."
+  let untar_cmd = "mkdir -p " + dest["path"] + " && tar xzf - -C " + dest["path"]
+  let full_cmd = "ssh -i " + origem["key"] + " -p " + str(origem["port"]) + " -o StrictHostKeyChecking=no " + origem["user"] + "@" + origem["host"] + " '" + tar_cmd + "' | ssh -i " + dest["key"] + " -p " + str(dest["port"]) + " -o StrictHostKeyChecking=no " + dest["user"] + "@" + dest["host"] + " '" + untar_cmd + "'"
+  sh(full_cmd)
+  print("Cópia para", dest["host"], "concluída.")
+
+fn main():
+  parallel_for(destinos, copiar_para_destino, forks=2)
+  print("Cópia finalizada para todos os destinos.")
+
+main()
+
