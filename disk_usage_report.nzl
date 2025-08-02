@@ -1,0 +1,17 @@
+#!/usr/bin/env nozzle
+# Gera relatório de uso de disco nos hosts
+
+let hosts = [
+  {"host":"192.168.15.50", "user":"root", "port":22, "key":"/root/.ssh/id_rsa"},
+  {"host":"192.168.15.60", "user":"root", "port":22, "key":"/root/.ssh/id_rsa"}
+]
+
+fn check_disk(h):
+  let res = ssh(h["host"], "df -hT | grep -v tmpfs", user=h["user"], port=h["port"], key=h["key"], sudo=true)
+  print("=== Uso de disco em", h["host"], "===\n", res["stdout"])
+  return res["stdout"]
+
+fn main():
+  parallel_for(hosts, check_disk, forks=2)
+
+main()
