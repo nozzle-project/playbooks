@@ -1,0 +1,50 @@
+#!/usr/bin/env nozzle
+# NOZZLE - Playbook para substituir texto em arquivos remotos
+
+# === Hosts alvo ===
+let hosts = [
+  {"host": "192.168.15.50", "user": "root", "port": 22, "key": "/root/.ssh/id_rsa"},
+  {"host": "192.168.15.60", "user": "root", "port": 22, "key": "/root/.ssh/id_rsa"}
+]
+
+# Caminho do arquivo, texto a ser substituído e novo texto
+let file_path = "/tmp/file"
+let texto_antigo = "antigo"
+let texto_novo = "novo"
+
+# Função que executa o replace via replace_line do Nozzle
+fn processa_host(h):
+  let host = h["host"]
+  let user = h.get("user", "root")
+  let port = h.get("port", 22)
+  let key = h.get("key", null)
+
+  print("(", host, ") Substituindo texto...")
+
+  # Garante que o arquivo existe
+  ssh(host, "test -f " + file_path + " || touch " + file_path, user=user, port=port, key=key, sudo=true)
+
+  # Copia o arquivo remoto para local temporariamente
+  let temp = "/tmp/temp_nozzle_" + host.replace(".", "_")
+  let pull_cmd = "scp -P " + str(port) + " -o StrictHostKeyChecking=no"
+  if key != null:
+    pull_cmd = pull_cmd + " -i " + key
+  pull_cmd = pull_cmd + " " + user + "@" + host + ":" + file_path + " " + temp
+  sh(pull_cmd)
+
+  # Substitui localmente
+  replace_line(temp, texto_antigo, texto_novo)
+
+  # Envia de volta
+  scp_file(host, temp, file_path, user=user, port=port, key=key, sudo=true)
+  sh("rm -f " + temp)
+
+  print("(", host, ") Substituição concluída.")
+
+# Execução paralela
+fn main():
+  parallel_for(hosts, processa_host, forks=2)
+  print("Substituição concluída em todos os hosts.")
+
+main()
+
