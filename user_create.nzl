@@ -1,0 +1,19 @@
+#!/usr/bin/env nozzle
+# Cria múltiplos usuários em servidores remotos
+
+let hosts = [
+  {"host":"192.168.15.50", "user":"root", "port":22, "key":"/root/.ssh/id_rsa"},
+  {"host":"192.168.15.60", "user":"root", "port":22, "key":"/root/.ssh/id_rsa"}
+]
+
+let users = ["devops", "admin", "backup"]
+
+fn create_users(h):
+  for i in range(0, len(users)):
+    ssh(h["host"], "useradd -m -s /bin/bash " + users[i] + " || true", user=h["user"], port=h["port"], key=h["key"], sudo=true)
+  print("Usuários criados em", h["host"])
+
+fn main():
+  parallel_for(hosts, create_users, forks=2)
+
+main()
