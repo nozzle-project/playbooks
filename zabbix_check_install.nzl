@@ -1,0 +1,77 @@
+#!/usr/bin/env nozzle
+# Check/install Zabbix Agent em w01..w05 (ou troque por IPs/FQDNs)
+
+let hosts = [
+  {"host":"w01", "user":"root", "port":22, "key":"/root/.ssh/id_rsa"},
+  {"host":"w02", "user":"root", "port":22, "key":"/root/.ssh/id_rsa"},
+  {"host":"w03", "user":"root", "port":22, "key":"/root/.ssh/id_rsa"},
+  {"host":"192.168.15.60", "user":"root", "port":22, "key":"/root/.ssh/id_rsa"},
+  {"host":"192.168.15.50", "user":"root", "port":22, "key":"/root/.ssh/id_rsa"}
+]
+
+fn is_installed(h):
+  # considera instalado se binário existir
+  let host = h["host"]
+  let user = h.get("user","root")
+  let port = h.get("port",22)
+  let key  = h.get("key",null)
+  let r = ssh(host, "command -v zabbix_agentd >/dev/null 2>&1 || test -x /usr/sbin/zabbix_agentd || test -x /usr/bin/zabbix_agentd", user=user, port=port, key=key)
+  return (r["rc"] == 0)
+
+fn install_zabbix(h):
+  let host = h["host"]
+  let user = h.get("user","root")
+  let port = h.get("port",22)
+  let key  = h.get("key",null)
+
+  # Detecta Debian/Ubuntu
+  if ssh(host, "command -v apt-get >/dev/null 2>&1", user=user, port=port, key=key)["rc"] == 0:
+    # Debian/Ubuntu
+    ssh(host, "apt-get update", user=user, port=port, key=key, sudo=true)
+    let r = ssh(host, "apt-get install -y zabbix-agent", user=user, port=port, key=key, sudo=true)
+    if r["rc"] != 0:
+      print("(", host, ") falha instalando via apt-get (verifique repositórios)")
+      return r["rc"]
+  else:
+    # RHEL/CentOS/Oracle/Rocky/Alma
+    let r = ssh(host, "dnf -y install zabbix-agent || yum -y install zabbix-agent", user=user, port=port, key=key, sudo=true)
+    if r["rc"] != 0:
+      # fallback: tenta EPEL e tenta de novo (EL7/EL8)
+      ssh(host, "yum install -y epel-release || true", user=user, port=port, key=key, sudo=true)
+      r = ssh(host, "dnf -y install zabbix-agent || yum -y install zabbix-agent", user=user, port=port, key=key, sudo=true)
+      if r["rc"] != 0:
+        print("(", host, ") falha instalando via dnf/yum (considere adicionar o repo oficial do Zabbix)")
+        return r["rc"]
+
+  # habilita e inicia serviço
+  ssh(host, "systemctl enable zabbix-agent || chkconfig zabbix-agent on", user=user, port=port, key=key, sudo=true)
+  ssh(host, "systemctl restart zabbix-agent || service zabbix-agent restart", user=user, port=port, key=key, sudo=true)
+  return 0
+
+fn check_or_install(h):
+  let host = h["host"]
+  let user = h.get("user","root")
+  let port = h.get("port",22)
+  let key  = h.get("key",null)
+
+  if is_installed(h):
+    # tenta pegar versão
+    let ver = ssh(host, "(zabbix_agentd -V 2>&1 | head -1) || (zabbix_agent2 -V 2>&1 | head -1) || true", user=user, port=port, key=key)
+    print("(", host, ") Zabbix já instalado:", ver["stdout"])
+    return
+
+  print("(", host, ") Zabbix não encontrado. Instalando...")
+  let rc = install_zabbix(h)
+  if rc == 0:
+    let ver = ssh(host, "(zabbix_agentd -V 2>&1 | head -1) || (zabbix_agent2 -V 2>&1 | head -1) || true", user=user, port=port, key=key)
+    print("(", host, ") Zabbix instalado:", ver["stdout"])
+  else:
+    print("(", host, ") ERRO ao instalar (rc=", rc, ")")
+
+fn main():
+  # roda em paralelo (ajuste forks conforme seu ambiente)
+  parallel_for(hosts, check_or_install, forks=3)
+  print("Finalizado.")
+
+main()
+
